@@ -1,7 +1,9 @@
-import simplejson
-import urllib
+from .json_import import simplejson
 from httplib2 import Http
+from hashlib import sha256
+from urllib import urlencode
 import mimetypes
+import hmac
 
 
 class OAuth2AuthExchangeError(Exception):
@@ -24,9 +26,10 @@ class OAuth2API(object):
     # override with 'Instagram', etc
     api_name = "Generic API"
 
-    def __init__(self, client_id=None, client_secret=None, access_token=None, redirect_uri=None):
+    def __init__(self, client_id=None, client_secret=None, client_ips=None, access_token=None, redirect_uri=None):
         self.client_id = client_id
         self.client_secret = client_secret
+        self.client_ips = client_ips
         self.access_token = access_token
         self.redirect_uri = redirect_uri
 
@@ -66,7 +69,7 @@ class OAuth2AuthExchangeRequest(object):
         }
         if scope:
             client_params.update(scope=' '.join(scope))
-        url_params = urllib.urlencode(client_params)
+        url_params = urlencode(client_params)
         return "%s?%s" % (self.api.authorize_url, url_params)
 
     def _data_for_exchange(self, code=None, username=None, password=None, scope=None, user_id=None):
@@ -86,13 +89,13 @@ class OAuth2AuthExchangeRequest(object):
                 client_params.update(scope=' '.join(scope))
         elif user_id:
             client_params.update(user_id=user_id)
-        return urllib.urlencode(client_params)
+        return urlencode(client_params)
 
     def get_authorize_url(self, scope=None):
         return self._url_for_authorize(scope=scope)
 
     def get_authorize_login_url(self, scope=None):
-        http_object = Http()
+        http_object = Http(disable_ssl_certificate_validation=True)
 
         url = self._url_for_authorize(scope=scope)
         response, content = http_object.request(url)
@@ -103,10 +106,10 @@ class OAuth2AuthExchangeRequest(object):
 
     def exchange_for_access_token(self, code=None, username=None, password=None, scope=None, user_id=None):
         data = self._data_for_exchange(code, username, password, scope=scope, user_id=user_id)
-        http_object = Http()
+        http_object = Http(disable_ssl_certificate_validation=True)
         url = self.api.access_token_url
         response, content = http_object.request(url, method="POST", body=data)
-        parsed_content = simplejson.loads(content)
+        parsed_content = simplejson.loads(content.decode())
         if int(response['status']) != 200:
             raise OAuth2AuthExchangeError(parsed_content.get("error_message", ""))
         return parsed_content['access_token'], parsed_content['user']
@@ -115,6 +118,12 @@ class OAuth2AuthExchangeRequest(object):
 class OAuth2Request(object):
     def __init__(self, api):
         self.api = api
+
+    def _generate_sig(self, endpoint, params, secret):
+        sig = endpoint
+        for key in sorted(params.keys()):
+            sig += '|%s=%s' % (key, params[key])
+        return hmac.new(secret.encode(), sig.encode(), sha256).hexdigest()
 
     def url_for_get(self, path, parameters):
         return self._full_url_with_params(path, parameters)
@@ -125,18 +134,21 @@ class OAuth2Request(object):
     def post_request(self, path, **kwargs):
         return self.make_request(self.prepare_request("POST", path, kwargs))
 
-    def _full_url(self, path, include_secret=False):
-        return "%s://%s%s%s%s" % (self.api.protocol,
+    def _full_url(self, path, include_secret=False, include_signed_request=True):
+        return "%s://%s%s%s%s%s" % (self.api.protocol,
                                   self.api.host,
                                   self.api.base_path,
                                   path,
-                                  self._auth_query(include_secret))
+                                  self._auth_query(include_secret),
+                                  self._signed_request(path, {}, include_signed_request, include_secret))
 
-    def _full_url_with_params(self, path, params, include_secret=False):
-        return (self._full_url(path, include_secret) + self._full_query_with_params(params))
+    def _full_url_with_params(self, path, params, include_secret=False, include_signed_request=True):
+        return (self._full_url(path, include_secret) +
+                self._full_query_with_params(params) +
+                self._signed_request(path, params, include_signed_request, include_secret))
 
     def _full_query_with_params(self, params):
-        params = ("&" + urllib.urlencode(params)) if params else ""
+        params = ("&" + urlencode(params)) if params else ""
         return params
 
     def _auth_query(self, include_secret=False):
@@ -148,10 +160,22 @@ class OAuth2Request(object):
                 base += "&client_secret=%s" % (self.api.client_secret)
             return base
 
-    def _post_body(self, params):
-        return urllib.urlencode(params)
+    def _signed_request(self, path, params, include_signed_request, include_secret):
+        if include_signed_request and self.api.client_secret is not None:
+            if self.api.access_token:
+                params['access_token'] = self.api.access_token
+            elif self.api.client_id:
+                params['client_id'] = self.api.client_id
+            if include_secret and self.api.client_secret:
+                params['client_secret'] = self.api.client_secret
+            return "&sig=%s" % self._generate_sig(path, params, self.api.client_secret)
+        else:
+            return ''
 
-    def _encode_multipart(params, files):
+    def _post_body(self, params):
+        return urlencode(params)
+
+    def _encode_multipart(self, params, files):
         boundary = "MuL7Ip4rt80uND4rYF0o"
 
         def get_content_type(file_name):
@@ -207,5 +231,7 @@ class OAuth2Request(object):
         headers = headers or {}
         if not 'User-Agent' in headers:
             headers.update({"User-Agent": "%s Python Client" % self.api.api_name})
-        http_obj = Http()
+        # https://github.com/jcgregorio/httplib2/issues/173
+        # bug in httplib2 w/ Python 3 and disable_ssl_certificate_validation=True
+        http_obj = Http(disable_ssl_certificate_validation=True)
         return http_obj.request(url, method, body=body, headers=headers)

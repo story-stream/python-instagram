@@ -26,6 +26,13 @@ class Image(ApiModel):
 
 class Video(Image):
 
+    # 2017-10-18: Video media type returns a new kwarg: id
+    def __init__(self, *args, **kwargs):
+        for k,v in kwargs.iteritems():
+            setattr(self,k,v)
+
+        super(Image, self).__init__(*args)
+
     def __unicode__(self):
         return "Video: %s" % self.url
 
@@ -51,7 +58,7 @@ class Media(ApiModel):
         new_media.images = {}
         for version, version_info in entry['images'].iteritems():
             new_media.images[version] = Image.object_from_dictionary(version_info)
-            
+
         new_media.type = entry.get('type', 'image')
 
         if 'videos' in entry:

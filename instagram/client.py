@@ -81,9 +81,8 @@ class InstagramAPI(oauth2.OAuth2API):
 
     user = bind_method(
         path="/users/self",
-        accepts_parameters=MEDIA_ACCEPT_PARAMETERS,
         root_class=User,
-        paginates=True,
+        response_type="entry"
     )
 
     user_media_feed = bind_method(

@@ -159,8 +159,7 @@ class Location(ApiModel):
 
 class User(ApiModel):
 
-    def __init__(self, id, *args, **kwargs):
-        self.id = id
+    def __init__(self, *args, **kwargs):
         for key, value in kwargs.iteritems():
             setattr(self, key, value)
 

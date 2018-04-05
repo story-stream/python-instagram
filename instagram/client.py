@@ -79,6 +79,13 @@ class InstagramAPI(oauth2.OAuth2API):
                 response_type="entry",
                 root_class=Media)
 
+    user = bind_method(
+        path="/users/self",
+        accepts_parameters=MEDIA_ACCEPT_PARAMETERS,
+        root_class=Media,
+        paginates=True,
+    )
+
     user_media_feed = bind_method(
                 path="/users/self/feed",
                 accepts_parameters=MEDIA_ACCEPT_PARAMETERS,
@@ -92,10 +99,11 @@ class InstagramAPI(oauth2.OAuth2API):
                 paginates=True)
 
     user_recent_media = bind_method(
-                path="/users/{user_id}/media/recent",
-                accepts_parameters=MEDIA_ACCEPT_PARAMETERS + ['user_id'],
-                root_class=Media,
-                paginates=True)
+        path="/users/self/media/recent",
+        accepts_parameters=MEDIA_ACCEPT_PARAMETERS,
+        root_class=Media,
+        paginates=True,
+    )
 
     user_search = bind_method(
                 path="/users/search",
